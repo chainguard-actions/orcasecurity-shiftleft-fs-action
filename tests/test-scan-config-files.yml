@@ -1,0 +1,61 @@
+name: Test scan with config, exceptions and custom secret controls files
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create config files inside the workspace
+        run: |
+          mkdir -p orca-test-files
+          cat > orca-test-files/config.yaml <<'EOF'
+          no-color: true
+          EOF
+          cat > orca-test-files/exceptions.yaml <<'EOF'
+          exceptions: []
+          EOF
+          cat > orca-test-files/custom-secrets.yaml <<'EOF'
+          controls: []
+          EOF
+          ls -la orca-test-files
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          api_token: invalid-orca-token-for-testing
+          project_key: test-project
+          path: .
+          config: orca-test-files/config.yaml
+          exceptions_filepath: orca-test-files/exceptions.yaml
+          custom_secret_controls: orca-test-files/custom-secrets.yaml
+          no_color: "true"
+          disable_err_report: "true"
+          show_annotations: "false"
+          timeout: 2m
+      - name: Assert scan was invoked and exit_code output reported
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          EXIT_CODE: ${{ steps.action.outputs.exit_code }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "exit_code: $EXIT_CODE"
+          if ! echo "$EXIT_CODE" | grep -qE '^[0-9]+$'; then
+            echo "FAIL: exit_code output missing or not numeric"
+            exit 1
+          fi
+          if [ "$OUTCOME" = "success" ]; then
+            if [ "$EXIT_CODE" != "0" ]; then
+              echo "FAIL: step succeeded but exit_code is $EXIT_CODE"
+              exit 1
+            fi
+          elif [ "$OUTCOME" = "failure" ]; then
+            if [ "$EXIT_CODE" = "0" ]; then
+              echo "FAIL: step failed but exit_code is 0"
+              exit 1
+            fi
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+          echo "PASS"
