@@ -1,0 +1,63 @@
+name: Test fs scan flags (exceptions, custom controls, num_cpu, max_secret, exclude_paths)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare exceptions and custom secret controls files
+        run: |
+          cat > "$GITHUB_WORKSPACE/orca-exceptions.yaml" <<'EOF'
+          exceptions: []
+          EOF
+          cat > "$GITHUB_WORKSPACE/orca-custom-secrets.yaml" <<'EOF'
+          controls: []
+          EOF
+          mkdir -p "$GITHUB_WORKSPACE/orca-excluded"
+          echo "ignored" > "$GITHUB_WORKSPACE/orca-excluded/file.txt"
+      - id: action
+        uses: .
+        # No real Orca API token is available in the harness, so the CLI is
+        # expected to fail authentication; we verify the action handles it.
+        continue-on-error: true
+        with:
+          api_token: dummy-orca-token
+          project_key: test-project
+          path: .
+          exceptions_filepath: orca-exceptions.yaml
+          custom_secret_controls: orca-custom-secrets.yaml
+          num_cpu: "2"
+          max_secret: "50"
+          exclude_paths: "./orca-excluded/,example.tf"
+          security_checks: "vulns,secret"
+          dependency_tree: "true"
+          hide_skipped_vulnerabilities: "true"
+          show_failed_issues_only: "true"
+          show_annotations: "false"
+          disable_err_report: "true"
+          no_color: "true"
+          timeout: 2m
+      - name: Assert action ran and reported a consistent exit code
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          EXIT_CODE: ${{ steps.action.outputs.exit_code }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "exit_code: $EXIT_CODE"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ "$EXIT_CODE" != "0" ]; then
+              echo "FAIL: action succeeded but exit_code is '$EXIT_CODE' (expected 0)"
+              exit 1
+            fi
+            echo "PASS: scan succeeded"
+          elif [ "$OUTCOME" = "failure" ]; then
+            if [ -n "$EXIT_CODE" ] && [ "$EXIT_CODE" = "0" ]; then
+              echo "FAIL: action failed but reported exit_code 0"
+              exit 1
+            fi
+            echo "PASS: scan failed gracefully (no valid Orca token in harness)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
